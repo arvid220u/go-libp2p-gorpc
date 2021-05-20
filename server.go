@@ -69,6 +69,8 @@ import (
 
 var logger = logging.Logger("p2p-gorpc")
 
+const debug = false
+
 // Precompute the reflect type for error. Can't use error directly
 // because Typeof takes an empty interface value. This is annoying.
 var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
@@ -529,7 +531,7 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 	s.name = sname
 
 	// Install the methods
-	s.method = suitableMethods(s.typ, true)
+	s.method = suitableMethods(s.typ, debug)
 
 	if len(s.method) == 0 {
 		str := ""
