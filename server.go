@@ -177,7 +177,7 @@ func NewServer(h host.Host, p protocol.ID, opts ...ServerOption) *Server {
 			defer stream.Close()
 			err := s.handle(sWrap)
 			if err != nil {
-				logger.Error("error handling RPC:", err)
+				logger.Debug("error handling RPC:", err)
 				resp := &Response{ServiceID{}, err.Error(), responseErrorType(err), 0}
 				sendResponse(sWrap, resp, nil)
 			}
@@ -329,12 +329,12 @@ func (s *service) svcCall(sWrap *streamWrap, mtype *methodType, svcID ServiceID,
 
 func sendResponse(s *streamWrap, resp *Response, body interface{}) error {
 	if err := s.enc.Encode(resp); err != nil {
-		logger.Error("error encoding response:", err)
+		logger.Debug("error encoding response:", err)
 		s.stream.Reset()
 		return err
 	}
 	if err := s.enc.Encode(body); err != nil {
-		logger.Error("error encoding body:", err)
+		logger.Debug("error encoding body:", err)
 		s.stream.Reset()
 		return err
 	}
