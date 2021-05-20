@@ -1,7 +1,9 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
+	"github.com/libp2p/go-libp2p-gorpc/labgob"
 	"io"
 	"sync"
 
@@ -304,7 +306,20 @@ func (c *Client) send(call *Call) {
 		s.Reset()
 		return
 	}
-	if err := sWrap.enc.Encode(call.Args); err != nil {
+	qb := new(bytes.Buffer)
+	qe := labgob.NewEncoder(qb)
+	if err := qe.Encode(call.Args); err != nil {
+		call.doneWithError(newClientError(err))
+		s.Reset()
+		return
+	}
+	argsBytes := qb.Bytes()
+	if err := sWrap.enc.Encode(len(argsBytes)); err != nil {
+		call.doneWithError(newClientError(err))
+		s.Reset()
+		return
+	}
+	if err := sWrap.enc.Encode(argsBytes); err != nil {
 		call.doneWithError(newClientError(err))
 		s.Reset()
 		return
@@ -344,7 +359,14 @@ func receiveResponse(s *streamWrap, call *Call) error {
 
 	// Even on error we sent the reply so it needs to be
 	// read
-	if err := s.dec.Decode(call.Reply); err != nil && err != io.EOF {
+	replyBytes := make([]byte, resp.ReplyLen)
+	if err := s.dec.Decode(replyBytes); err != nil && err != io.EOF {
+		call.setError(newClientError(err))
+		return err
+	}
+	rb := bytes.NewBuffer(replyBytes)
+	rd := labgob.NewDecoder(rb)
+	if err := rd.Decode(call.Reply); err != nil {
 		call.setError(newClientError(err))
 		return err
 	}

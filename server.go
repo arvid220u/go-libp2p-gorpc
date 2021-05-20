@@ -45,6 +45,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -62,6 +63,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p-gorpc/labgob"
 	stats "github.com/libp2p/go-libp2p-gorpc/stats"
 )
 
@@ -96,9 +98,10 @@ type ServiceID struct {
 // Response is a header sent when responding to an RPC
 // request which includes any error that may have happened.
 type Response struct {
-	Service ServiceID
-	Error   string // error, if any.
-	ErrType responseErr
+	Service  ServiceID
+	Error    string // error, if any.
+	ErrType  responseErr
+	ReplyLen int
 }
 
 // AuthorizeWithMap returns an authrorization function that follows the
@@ -173,7 +176,7 @@ func NewServer(h host.Host, p protocol.ID, opts ...ServerOption) *Server {
 			err := s.handle(sWrap)
 			if err != nil {
 				logger.Error("error handling RPC:", err)
-				resp := &Response{ServiceID{}, err.Error(), responseErrorType(err)}
+				resp := &Response{ServiceID{}, err.Error(), responseErrorType(err), 0}
 				sendResponse(sWrap, resp, nil)
 			}
 		})
@@ -243,9 +246,24 @@ func (server *Server) handle(s *streamWrap) error {
 		argIsValue = true
 	}
 	// argv guaranteed to be a pointer now.
-	if err = s.dec.Decode(argv.Interface()); err != nil {
+	var argvBytesLen int
+	err = s.dec.Decode(&argvBytesLen)
+	if err != nil {
 		return newServerError(err)
 	}
+	argBytes := make([]byte, argvBytesLen)
+	if err = s.dec.Decode(argBytes); err != nil {
+		return newServerError(err)
+	}
+
+	// decode the argument.
+	ab := bytes.NewBuffer(argBytes)
+	ad := labgob.NewDecoder(ab)
+	err = ad.Decode(argv.Interface())
+	if err != nil {
+		return newServerError(err)
+	}
+
 	if argIsValue {
 		argv = argv.Elem()
 	}
@@ -296,9 +314,15 @@ func (s *service) svcCall(sWrap *streamWrap, mtype *methodType, svcID ServiceID,
 	if errInter != nil {
 		errmsg = errInter.(error).Error()
 	}
-	resp := &Response{svcID, errmsg, nonRPCErr}
+	// encode the reply.
+	rb := new(bytes.Buffer)
+	re := labgob.NewEncoder(rb)
+	re.EncodeValue(replyv)
+	replyBytes := rb.Bytes()
 
-	return sendResponse(sWrap, resp, replyv.Interface())
+	resp := &Response{svcID, errmsg, nonRPCErr, len(replyBytes)}
+
+	return sendResponse(sWrap, resp, replyBytes)
 }
 
 func sendResponse(s *streamWrap, resp *Response, body interface{}) error {
